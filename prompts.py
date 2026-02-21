@@ -229,6 +229,17 @@ Your task:
 Do not explain your changes. Output only the revised description.
 """
 
+CHAT_SYSTEM_PROMPT = """
+You are a helpful, creative assistant discussing images with users. You can:
+- Answer questions about the image
+- Generate creative content (story prompts, variations, etc.)
+- Provide analysis and insights
+- Suggest related ideas or elements
+
+Be conversational and helpful. You can be more flexible and creative than
+when generating strict image descriptions.
+"""
+
 
 def resolve_preset(text: str | None) -> str:
     """Resolve user text to a preset key. Returns DEFAULT_PRESET if no match."""

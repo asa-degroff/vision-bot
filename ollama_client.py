@@ -3,9 +3,7 @@ import time
 
 from ollama import AsyncClient
 
-from prompts import CONVERSATION_PROMPT
-
-from prompts import CONVERSATION_PROMPT
+from prompts import CHAT_SYSTEM_PROMPT, CONVERSATION_PROMPT
 
 
 async def wait_for_model_slot(client: AsyncClient, model_name: str, timeout: int = 300) -> bool:
@@ -87,6 +85,32 @@ async def modify_description(
     return clean_output(response["message"]["content"])
 
 
+async def chat_with_image(
+    client: AsyncClient,
+    model_name: str,
+    image_bytes: bytes,
+    chat_history: list[dict],
+    user_message: str,
+    max_history_turns: int = 10,
+) -> str:
+    """Multi-turn chat with image context."""
+    messages = [
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+        {"role": "user", "content": "Analyze this image.", "images": [image_bytes]},
+        *chat_history[-max_history_turns:],
+        {"role": "user", "content": user_message},
+    ]
+
+    response = await client.chat(
+        model=model_name,
+        messages=messages,
+        keep_alive="5m",
+        options={"temperature": 0.7, "num_ctx": 8192},
+    )
+
+    return clean_output(response["message"]["content"])
+
+
 def clean_output(text: str) -> str:
     """Strip think blocks, code fences, common preambles, and normalize whitespace."""
     # Strip <think>...</think> blocks
@@ -105,30 +129,3 @@ def clean_output(text: str) -> str:
     # Normalize whitespace
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
-async def modify_description(
-    client: AsyncClient,
-    model_name: str,
-    original_description: str,
-    modification_request: str,
-) -> str:
-    """Modify an existing description based on user request."""
-    prompt = CONVERSATION_PROMPT.format(
-        original_description=original_description,
-        modification_request=modification_request,
-    )
-
-    response = await client.chat(
-        model=model_name,
-        messages=[
-            {
-                "role": "system",
-                "content": "You modify image descriptions based on user requests. Output only the revised description, no explanations.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        options={"temperature": 0.5, "num_ctx": 8192},
-    )
-
-    return clean_output(response["message"]["content"])
