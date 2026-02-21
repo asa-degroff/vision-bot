@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 venv/
 vision-bot.service
+user_state.json
+user_state.json

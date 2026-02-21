@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from collections import defaultdict
@@ -24,9 +25,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+STATE_FILE = "user_state.json"
+
 user_state: dict[int, dict] = defaultdict(
     lambda: {"mode": DEFAULT_PRESET, "last_image": None}
 )
+
+
+def load_user_state():
+    """Load persisted user state from disk."""
+    logger.info("Looking for state file at: %s", os.path.abspath(STATE_FILE))
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                data = json.load(f)
+                for uid, state in data.items():
+                    user_state[int(uid)] = state
+            logger.info("Loaded user state for %d users", len(data))
+        except Exception as e:
+            logger.warning("Failed to load user state: %s", e)
+    else:
+        logger.info("No existing state file found, starting fresh")
+
+
+def save_user_state(uid: int):
+    """Persist user state to disk."""
+    try:
+        data = {str(k): v for k, v in user_state.items()}
+        # Remove last_image from persistence (it's binary data)
+        for state in data.values():
+            state.pop("last_image", None)
+        with open(STATE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+        logger.debug("Saved user state for %d users", len(data))
+    except Exception as e:
+        logger.error("Failed to save user state: %s", e, exc_info=True)
 
 
 # --- Helpers ---
@@ -109,11 +142,15 @@ async def send_long_message(
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    current_mode = user_state[uid]["mode"]
+    current_name = PRESETS[current_mode]["name"]
     await update.message.reply_text(
-        "Welcome! Send me an image and I'll describe it using AI.\n\n"
-        "By default I use the *Detailed* preset. You can:\n"
-        "- Add a caption like `tags` or `sd` to override the mode for one image\n"
-        "- Use /mode to change your default preset\n"
+        f"Welcome! Send me an image and I'll describe it using AI.\n\n"
+        f"Your current default preset is *{current_name}*.\n\n"
+        "I'll remember the last preset you used for each image. You can:\n"
+        "- Add a caption like `tags` or `sd` to change your default and process the image\n"
+        "- Use /mode to change your default preset without sending an image\n"
         "- Use /help to see all presets and commands",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -168,8 +205,14 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption
     if caption:
         preset_key = resolve_preset(caption)
+        # Remember this as the user's new default
+        old_mode = user_state[uid]["mode"]
+        user_state[uid]["mode"] = preset_key
+        logger.info("User %d: changing default from '%s' to '%s' (caption: %s)", uid, old_mode, preset_key, caption)
+        save_user_state(uid)
     else:
         preset_key = user_state[uid]["mode"]
+        logger.info("User %d: using saved default '%s' (no caption)", uid, preset_key)
 
     preset = PRESETS[preset_key]
 
@@ -212,6 +255,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key not in PRESETS:
             return
         user_state[uid]["mode"] = key
+        save_user_state(uid)
+        logger.info("User %d: changed mode to '%s' via keyboard", uid, key)
         await query.edit_message_text(
             f"Default mode set to *{PRESETS[key]['name']}*.",
             parse_mode=ParseMode.MARKDOWN,
@@ -226,6 +271,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not image_bytes:
             await query.edit_message_text("No image stored. Send a new image first.")
             return
+
+        # Update and save as new default
+        user_state[uid]["mode"] = key
+        save_user_state(uid)
+        logger.info("User %d: changed mode to '%s' via redo button", uid, key)
 
         preset = PRESETS[key]
         ollama_client: AsyncClient = context.bot_data["ollama_client"]
@@ -286,6 +336,9 @@ def main():
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     model_name = os.getenv("MODEL_NAME", "qwen3-vl:8b")
+
+    # Load persisted user state
+    load_user_state()
 
     app = Application.builder().token(bot_token).build()
 

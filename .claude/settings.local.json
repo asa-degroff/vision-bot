@@ -14,7 +14,10 @@
       "Bash(ollama list:*)",
       "WebFetch(domain:deepwiki.com)",
       "Bash(curl:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(systemctl status:*)",
+      "Bash(echo Not running as systemd service:*)",
+      "Bash(sudo systemctl:*)"
     ]
   }
 }
