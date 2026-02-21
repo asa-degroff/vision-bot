@@ -17,8 +17,8 @@ from telegram.ext import (
     filters,
 )
 
-from ollama_client import describe_image
-from prompts import DEFAULT_PRESET, PRESETS, resolve_preset
+from ollama_client import describe_image, modify_description
+from prompts import CONVERSATION_PROMPT, DEFAULT_PRESET, PRESETS, resolve_preset
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 STATE_FILE = "user_state.json"
 
 user_state: dict[int, dict] = defaultdict(
-    lambda: {"mode": DEFAULT_PRESET, "last_image": None}
+    lambda: {"mode": DEFAULT_PRESET, "last_image": None, "last_output": None, "conversation_mode": False}
 )
 
 
@@ -60,6 +60,12 @@ def save_user_state(uid: int):
         logger.debug("Saved user state for %d users", len(data))
     except Exception as e:
         logger.error("Failed to save user state: %s", e, exc_info=True)
+
+
+def reset_conversation(uid: int):
+    """Reset conversation mode for a user."""
+    user_state[uid]["conversation_mode"] = False
+    user_state[uid]["last_output"] = None
 
 
 # --- Helpers ---
@@ -151,6 +157,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "I'll remember the last preset you used for each image. You can:\n"
         "- Add a caption like `tags` or `sd` to change your default and process the image\n"
         "- Use /mode to change your default preset without sending an image\n"
+        "- Reply with text after an image to modify the description (e.g., 'make it darker')\n"
         "- Use /help to see all presets and commands",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -169,8 +176,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"\n*Current default:* {current_name}")
     lines.append("\n*Commands:*")
     lines.append("  /mode \u2014 Change default preset")
+    lines.append("  /stop \u2014 Exit conversation mode")
     lines.append("  /help \u2014 Show this message")
-    lines.append("\n*Tip:* Send an image with a caption (e.g. `sd` or `tags`) to use that preset once.")
+    lines.append("\n*Tip:* After sending an image, you can reply with text to modify the description (e.g., 'make the character face left').")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
@@ -238,10 +246,71 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     typing_task.cancel()
 
+    # Store for conversation mode
+    user_state[uid]["last_output"] = result
+    user_state[uid]["conversation_mode"] = True
+
     parse_mode = ParseMode.MARKDOWN if preset["markdown"] else None
     keyboard = preset_keyboard(exclude=preset_key)
 
     await send_long_message(update, result, parse_mode=parse_mode, reply_markup=keyboard)
+
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exit conversation mode."""
+    uid = update.effective_user.id
+    if user_state[uid]["conversation_mode"]:
+        reset_conversation(uid)
+        await update.message.reply_text("Conversation mode exited. Send a new image anytime.")
+    else:
+        await update.message.reply_text("Not in conversation mode. Send an image first.")
+
+
+async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text messages for conversation mode (modifying last output)."""
+    uid = update.effective_user.id
+    ollama_client: AsyncClient = context.bot_data["ollama_client"]
+    model_name: str = context.bot_data["model_name"]
+
+    # Only process if in conversation mode
+    if not user_state[uid].get("conversation_mode"):
+        return  # Ignore text when not in conversation mode
+
+    # Check if we have a last_output to modify
+    last_output = user_state[uid].get("last_output")
+    if not last_output:
+        reset_conversation(uid)
+        await update.message.reply_text("No image description to modify. Send an image first.")
+        return
+
+    modification_request = update.message.text
+
+    # Typing indicator
+    typing_task = await send_typing_loop(update.effective_chat.id, context)
+
+    try:
+        result = await modify_description(
+            ollama_client, model_name, last_output, modification_request
+        )
+    except RuntimeError as e:
+        typing_task.cancel()
+        await update.message.reply_text(f"Error: {e}")
+        return
+    except Exception as e:
+        typing_task.cancel()
+        logger.error("modify_description failed: %s", e, exc_info=True)
+        await update.message.reply_text("Something went wrong while modifying the description.")
+        return
+
+    typing_task.cancel()
+
+    # Update state with new output
+    user_state[uid]["last_output"] = result
+    logger.info("User %d: modified description with '%s'", uid, modification_request[:50])
+
+    # Send response with keyboard to continue or exit
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Exit Conversation", callback_data="conv:exit")]])
+    await send_long_message(update, result, reply_markup=keyboard)
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -317,6 +386,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=chat_id, text=result, reply_markup=keyboard
             )
 
+        # Update last_output for conversation mode
+        user_state[uid]["last_output"] = result
+        user_state[uid]["conversation_mode"] = True
+
+    elif data == "conv:exit":
+        reset_conversation(uid)
+        await query.edit_message_text("Conversation mode exited.")
+
 
 async def _typing_loop(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -348,9 +425,11 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("mode", mode_command))
+    app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(
         MessageHandler(filters.PHOTO | filters.Document.IMAGE, image_handler)
     )
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
     app.add_handler(CallbackQueryHandler(callback_handler))
 
     logger.info("Bot starting with model %s at %s", model_name, ollama_url)

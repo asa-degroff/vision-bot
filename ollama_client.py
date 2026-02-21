@@ -3,6 +3,10 @@ import time
 
 from ollama import AsyncClient
 
+from prompts import CONVERSATION_PROMPT
+
+from prompts import CONVERSATION_PROMPT
+
 
 async def wait_for_model_slot(client: AsyncClient, model_name: str, timeout: int = 300) -> bool:
     """Wait until no other model is loaded, or our model is already loaded."""
@@ -55,6 +59,34 @@ async def describe_image(
     return clean_output(response["message"]["content"])
 
 
+async def modify_description(
+    client: AsyncClient,
+    model_name: str,
+    original_description: str,
+    modification_request: str,
+) -> str:
+    """Modify an existing description based on user request."""
+    prompt = CONVERSATION_PROMPT.format(
+        original_description=original_description,
+        modification_request=modification_request,
+    )
+
+    response = await client.chat(
+        model=model_name,
+        messages=[
+            {
+                "role": "system",
+                "content": "You modify image descriptions based on user requests. Output only the revised description, no explanations.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        keep_alive=0,
+        options={"temperature": 0.5, "num_ctx": 8192},
+    )
+
+    return clean_output(response["message"]["content"])
+
+
 def clean_output(text: str) -> str:
     """Strip think blocks, code fences, common preambles, and normalize whitespace."""
     # Strip <think>...</think> blocks
@@ -73,3 +105,30 @@ def clean_output(text: str) -> str:
     # Normalize whitespace
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+async def modify_description(
+    client: AsyncClient,
+    model_name: str,
+    original_description: str,
+    modification_request: str,
+) -> str:
+    """Modify an existing description based on user request."""
+    prompt = CONVERSATION_PROMPT.format(
+        original_description=original_description,
+        modification_request=modification_request,
+    )
+
+    response = await client.chat(
+        model=model_name,
+        messages=[
+            {
+                "role": "system",
+                "content": "You modify image descriptions based on user requests. Output only the revised description, no explanations.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        options={"temperature": 0.5, "num_ctx": 8192},
+    )
+
+    return clean_output(response["message"]["content"])

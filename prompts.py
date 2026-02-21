@@ -211,6 +211,24 @@ ALIASES = {
 
 DEFAULT_PRESET = "detailed"
 
+CONVERSATION_PROMPT = """
+You are modifying an existing image description based on user feedback.
+
+ORIGINAL DESCRIPTION:
+{original_description}
+
+USER'S MODIFICATION REQUEST:
+{modification_request}
+
+Your task:
+1. Understand what the user wants to change
+2. Apply ONLY that change to the original description
+3. Keep everything else consistent with the original style and format
+4. Output the complete modified description (not just the changes)
+
+Do not explain your changes. Output only the revised description.
+"""
+
 
 def resolve_preset(text: str | None) -> str:
     """Resolve user text to a preset key. Returns DEFAULT_PRESET if no match."""
