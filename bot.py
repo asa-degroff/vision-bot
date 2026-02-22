@@ -253,7 +253,13 @@ async def image_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except RuntimeError as e:
         typing_task.cancel()
-        await update.message.reply_text(f"Error: {e}")
+        error_msg = str(e)
+        if "Timed out waiting for Ollama model slot" in error_msg:
+            user_state[uid]["retry_preset"] = preset_key
+            keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="retry:timeout")]])
+            await update.message.reply_text(f"Error: {e}", reply_markup=keyboard)
+        else:
+            await update.message.reply_text(f"Error: {e}")
         return
     except Exception as e:
         typing_task.cancel()
@@ -456,7 +462,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except RuntimeError as e:
             typing_task.cancel()
-            await context.bot.send_message(chat_id=chat_id, text=f"Error: {e}")
+            error_msg = str(e)
+            if "Timed out waiting for Ollama model slot" in error_msg:
+                user_state[uid]["retry_preset"] = key
+                keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Try Again", callback_data="retry:timeout")]])
+                await context.bot.send_message(chat_id=chat_id, text=f"Error: {e}", reply_markup=keyboard)
+            else:
+                await context.bot.send_message(chat_id=chat_id, text=f"Error: {e}")
             return
         except Exception as e:
             typing_task.cancel()
