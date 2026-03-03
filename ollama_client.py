@@ -51,7 +51,7 @@ async def describe_image(
             },
         ],
         keep_alive=0,
-        options={"temperature": 0.7, "num_ctx": 8192},
+        options={"temperature": 0.7, "num_ctx": 4096},
     )
 
     return clean_output(response["message"]["content"])
@@ -105,7 +105,7 @@ async def chat_with_image(
         model=model_name,
         messages=messages,
         keep_alive="5m",
-        options={"temperature": 0.7, "num_ctx": 8192},
+        options={"temperature": 0.7, "num_ctx": 4096},
     )
 
     return clean_output(response["message"]["content"])
