@@ -7,7 +7,14 @@ from prompts import CHAT_SYSTEM_PROMPT, CONVERSATION_PROMPT
 
 
 async def wait_for_model_slot(client: AsyncClient, model_name: str, timeout: int = 300) -> bool:
-    """Wait until no other model is loaded, or our model is already loaded."""
+    """Wait until no other model is loaded, or our model is already loaded.
+
+    Skips the check for cloud/remote models (tag contains 'cloud') since
+    they don't need a local GPU slot.
+    """
+    if ":cloud" in model_name:
+        return True
+
     deadline = time.monotonic() + timeout
     while True:
         response = await client.ps()

@@ -525,7 +525,7 @@ def main():
         raise SystemExit("BOT_TOKEN not set in environment")
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    model_name = os.getenv("MODEL_NAME", "qwen3.5:9b")
+    model_name = os.getenv("MODEL_NAME", "qwen3.5:cloud")
 
     # Load persisted user state
     load_user_state()
